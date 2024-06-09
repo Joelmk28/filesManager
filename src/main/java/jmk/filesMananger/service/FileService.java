@@ -1,6 +1,10 @@
 package jmk.filesMananger.service;
 
 import jmk.filesMananger.controller.FileController;
+import jmk.filesMananger.entity.FileInfo;
+import jmk.filesMananger.entity.TypeFile;
+import jmk.filesMananger.repository.IFileRepository;
+import lombok.AllArgsConstructor;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 import org.springframework.stereotype.Service;
@@ -14,9 +18,12 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
 import java.util.*;
-import java.util.stream.Stream;
+
+@AllArgsConstructor
 @Service
-public class FileStorageService implements IFileStorageService {
+public class FileService implements IFileService {
+
+    private IFileRepository iFileRepository;
 
     //initialisation du repertoire ( existant ou pas )
     private final Path root =Paths.get("uploads");
@@ -25,7 +32,7 @@ public class FileStorageService implements IFileStorageService {
     private final Path zipPath = Paths.get("uploads/zip");
 
 
-    public void init() {
+    private void init() {
         try{
             //si le repertoire n'existe pas on en cree
             Files.createDirectories(root);
@@ -37,9 +44,23 @@ public class FileStorageService implements IFileStorageService {
             throw new RuntimeException(e.getMessage());
         }
     }
+    private FileInfo insertUrl(Path path,TypeFile typeFile,String fileName,String methodeName){
+        //recuperation de l'url grace au nom
+        String url = MvcUriComponentsBuilder
+                .fromMethodName(FileController.class, methodeName,path.getFileName().toString())
+                .build().toString();
+
+        //construction de l'image avec FileInfo pour enregistré dans la bdd
+        FileInfo file = FileInfo.builder()
+                .name(fileName)
+                .url(url)
+                .type(typeFile)
+                .build();
+        return file;
+    }
 
     @Override
-    public void save(MultipartFile file) {
+    public FileInfo save(MultipartFile file) {
 
         this.init();
        try {
@@ -50,6 +71,8 @@ public class FileStorageService implements IFileStorageService {
            final InputStream inputStream = file.getInputStream();
            //recupation de l'extension
            final String extension = file.getOriginalFilename().substring(file.getOriginalFilename().lastIndexOf(".") + 1);
+
+           /*
            System.out.println("*****************************\n " +
                    "Type: "+file.getContentType()+"\n"+
                    "Resource : "+file.getResource()+"\n"+
@@ -57,7 +80,7 @@ public class FileStorageService implements IFileStorageService {
                    "Original Name: "+file.getOriginalFilename()+"\n"+
                    "Taille: "+file.getSize()+"\n"+
                    "Extension: "+ extension +"\n"+
-                   "**************************************");
+                   "**************************************"); */
 
            //determination de les extenstions
            List<String>imageExtensions = Arrays.asList("png","jpg","jpeg");
@@ -73,22 +96,24 @@ public class FileStorageService implements IFileStorageService {
           if(imageExtensions.stream().anyMatch(s -> s.equalsIgnoreCase(extension))){
                final Path imagePath = this.imagePath.resolve(uniqueFileName);
                Files.copy(inputStream,imagePath);
-              String url = MvcUriComponentsBuilder
-                      .fromMethodName(FileController.class, "getFile",imagePath .getFileName().toString())
-                      .build().toString();
-               return;
+               //insertion de l'url dans l'obejt du type FileInfos
+               FileInfo image = this.insertUrl(imagePath,TypeFile.IMAGE,uniqueFileName,"getImage");
+               //enregistrement
+              return iFileRepository.save(image);
            }
 
           if(documentExtensions.stream().anyMatch(s -> s.equalsIgnoreCase(extension))){
               final Path documentPath = this.documentPath.resolve(uniqueFileName);
               Files.copy(inputStream,documentPath);
-              return;
+              //insertion de l'url dans l'obejt du type FileInfos
+              FileInfo document = insertUrl(documentPath,TypeFile.DOCUMENT,uniqueFileName,"getDocument");
+              return iFileRepository.save(document);
           }
 
-           final Path path = this.root.resolve(uniqueFileName);
+           //final Path path = this.root.resolve(uniqueFileName);
            //enregistrement du fichier
-           Files.copy(inputStream, path);
-
+           //Files.copy(inputStream, path);
+           throw new RuntimeException("Please make sure the file is an image, pdf, doc, zip");
 
        }
        catch (IOException e){
@@ -99,7 +124,7 @@ public class FileStorageService implements IFileStorageService {
 
 
     @Override
-    public Resource load(String filename) {
+    public Resource loadImage(String filename) {
         try{
             //definition du chemin
             Path imageFile = this.imagePath.resolve(filename);
@@ -119,9 +144,38 @@ public class FileStorageService implements IFileStorageService {
 
     }
 
+    @Override
+    public Resource loadDocument(String filename) {
+        try{
+            //definition du chemin
+            Path imageFile = this.documentPath.resolve(filename);
+            //covertion du chemin en url
+            Resource resource = new UrlResource(imageFile.toUri());
+            //vérifie si le fichier existe et s'il est lisible
+            if(resource.exists()||resource.isReadable()){
+                return resource;
+            }
+            else{
+                throw new RuntimeException("Vous ne pouvez pas lire ce fichier");
+            }
+        }
+        catch (IOException e){
+            throw new RuntimeException(e.getMessage());
+        }
+
+    }
+
 
     @Override
+    public List<FileInfo> getAllImages(){
+      return  iFileRepository.findAll();
+    }
+
+
+/*
+    @Override
     public Stream<Path> getAllImages(){
+
         try {
             return //parcourir le repertoire que l'on defini avec une profondeur d'1 niveau
                     Files.walk(this.imagePath,1)
@@ -133,5 +187,5 @@ public class FileStorageService implements IFileStorageService {
           throw new RuntimeException(e.getMessage());
         }
 
-    }
+    }*/
 }
